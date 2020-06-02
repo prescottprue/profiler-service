@@ -1,15 +1,15 @@
-import * as admin from 'firebase-admin';
+// import * as admin from 'firebase-admin';
 import { readFile, mkdirSync, existsSync, writeFileSync, unlinkSync } from 'fs';
 import { promisify } from 'util';
 import { dirname } from 'path';
 import { format } from 'date-fns';
-import { Logging } from '@google-cloud/logging';
+// import { Logging } from '@google-cloud/logging';
 import { runCommand, to } from './utils';
 import { MINS_TO_S_CONVERSION } from './constants';
 // const { Logging } = require('@google-cloud/logging'); // eslint-disable-line
 
 // Creates a client
-const logging = new Logging();
+// const logging = new Logging();
 
 const readFilePromise = promisify(readFile);
 
@@ -46,11 +46,10 @@ async function profileDatabase(
     '-o',
     outputPath,
     '--project',
-    projectName || '',
+    projectName || 'reside-test',
     '-d',
     duration?.toString() || '30',
   ];
-  console.log('Running command with args:', commandArgs);
 
   if (process.env.FIREBASE_TOKEN) {
     commandArgs.push('--token', process.env.FIREBASE_TOKEN);
@@ -59,6 +58,7 @@ async function profileDatabase(
       'NOTE: Running without FIREBASE_TOKEN can cause authentication issues',
     );
   }
+  console.log('Running command with args:', commandArgs);
 
   try {
     // Call database profiler
@@ -101,6 +101,9 @@ async function parseResults(resultsPath: string): Promise<any[]> {
 
   // Split results into different lines and parse into JSON
   const parsedLines = resultsStringsByLine.map((resultLineStr, lineIdx) => {
+    if (!resultLineStr) {
+      return resultLineStr;
+    }
     try {
       return JSON.parse(resultLineStr);
     } catch (err) {
@@ -119,84 +122,107 @@ async function parseResults(resultsPath: string): Promise<any[]> {
 /**
  *
  */
-async function getServiceAccount(): Promise<any> {
-  // Load from environment variable
-  if (process.env.SERVICE_ACCOUNT) {
-    console.log('Loading service account from environment variable');
-    try {
-      return JSON.parse(process.env.SERVICE_ACCOUNT);
-    } catch (err) {
-      console.error('Error parsing SERVICE_ACCOUNT env variable:', err);
-      throw err;
-    }
-  }
+// async function getServiceAccount(): Promise<any> {
+//   // Load from environment variable
+//   if (process.env.SERVICE_ACCOUNT) {
+//     console.log('Loading service account from environment variable');
+//     try {
+//       return JSON.parse(process.env.SERVICE_ACCOUNT);
+//     } catch (err) {
+//       console.error('Error parsing SERVICE_ACCOUNT env variable:', err);
+//       throw err;
+//     }
+//   }
 
-  // Load from local file
-  const serviceAccountPath = './serviceAccount.json';
-  if (existsSync(serviceAccountPath)) {
-    console.log('Loading service account from local file');
-    const saStr = await readFilePromise(serviceAccountPath);
-    try {
-      return JSON.parse(saStr.toString());
-    } catch (err) {
-      console.log('Error parsing SERVICE_ACCOUNT file');
-      throw err;
-    }
-  }
-  const serviceSccountErr = 'Service Account not found';
-  console.error(serviceSccountErr);
-  throw new Error(serviceSccountErr);
-}
+//   // Load from local file
+//   const serviceAccountPath = './serviceAccount.json';
+//   if (existsSync(serviceAccountPath)) {
+//     console.log('Loading service account from local file');
+//     const saStr = await readFilePromise(serviceAccountPath);
+//     try {
+//       return JSON.parse(saStr.toString());
+//     } catch (err) {
+//       console.log('Error parsing SERVICE_ACCOUNT file');
+//       throw err;
+//     }
+//   }
+//   const serviceSccountErr = 'Service Account not found';
+//   console.error(serviceSccountErr);
+//   throw new Error(serviceSccountErr);
+// }
 
-interface UploadSettings {
-  project?: string;
-  bucketName?: string;
-}
+// interface UploadSettings {
+//   project?: string;
+//   bucketName?: string;
+// }
 /**
  * @param cloudStorageFilePath - Path to file in cloud storage
  * @param resultsToUpload - JSON results to upload
  * @param settings - Settings for upload
  */
-async function uploadResults(
-  cloudStorageFilePath: string,
+// async function uploadResults(
+//   cloudStorageFilePath: string,
+//   resultsToUpload: string[],
+//   settings?: UploadSettings,
+// ): Promise<any> {
+//   console.log(
+//     `Writing profiler results cloud storage path: ${cloudStorageFilePath}...`,
+//   );
+//   // Load service account from environment variable falling back to local file
+//   const sa = await getServiceAccount();
+//   const credential =
+//     admin.credential.cert(sa) || admin.credential.applicationDefault();
+//   const projectId =
+//     settings?.project ||
+//     sa?.project_id ||
+//     process.env.GCLOUD_PROJECT ||
+//     process.env.GCP_PROJECT;
+//   const bucketName =
+//     (settings && settings.bucketName) || `${projectId}.appspot.com`;
+
+//   admin.initializeApp({
+//     credential,
+//     databaseURL: `https://${projectId}.firebaseio.com`,
+//   });
+
+//   try {
+//     const stringifiedResults = JSON.stringify(resultsToUpload, null, 2);
+//     const results = await admin
+//       .storage()
+//       .bucket(bucketName)
+//       .file(cloudStorageFilePath)
+//       .save(stringifiedResults);
+//     console.log(
+//       `Successfully uploaded to ${bucketName}/${cloudStorageFilePath}`,
+//     );
+//     return results;
+//   } catch (err) {
+//     console.error(`Error uploading ${cloudStorageFilePath}: `, err);
+//     throw err;
+//   }
+// }
+
+/**
+ * @param filePath
+ * @param resultsToUpload
+ */
+async function writeResultsLocally(
+  filePath: string,
   resultsToUpload: string[],
-  settings?: UploadSettings,
 ): Promise<any> {
-  console.log(
-    `Writing profiler results cloud storage path: ${cloudStorageFilePath}...`,
-  );
-  // Load service account from environment variable falling back to local file
-  const sa = await getServiceAccount();
-  const credential =
-    admin.credential.cert(sa) || admin.credential.applicationDefault();
-  const projectId =
-    settings?.project ||
-    sa?.project_id ||
-    process.env.GCLOUD_PROJECT ||
-    process.env.GCP_PROJECT;
-  const bucketName =
-    (settings && settings.bucketName) || `${projectId}.appspot.com`;
-
-  admin.initializeApp({
-    credential,
-    databaseURL: `https://${projectId}.firebaseio.com`,
-  });
-
+  const outFolder = dirname(filePath);
   try {
-    const stringifiedResults = JSON.stringify(resultsToUpload, null, 2);
-    const results = await admin
-      .storage()
-      .bucket(bucketName)
-      .file(cloudStorageFilePath)
-      .save(stringifiedResults);
-    console.log(
-      `Successfully uploaded to ${bucketName}/${cloudStorageFilePath}`,
-    );
-    return results;
+    // Create folder for file path
+    if (!existsSync(outFolder)) {
+      mkdirSync(outFolder);
+    }
   } catch (err) {
-    console.error(`Error uploading ${cloudStorageFilePath}: `, err);
+    console.log(`Error making folder for path:"${filePath}":`, err);
     throw err;
   }
+
+  const stringifiedResults = JSON.stringify(resultsToUpload);
+  await writeFileSync(filePath, stringifiedResults);
 }
 
 interface ProfileAndUploadOptions {
@@ -214,12 +240,11 @@ export async function profileAndUpload(
   console.log('Called profile and upload', options);
   const now = new Date();
   const currentDateStamp = format(now, 'MM-dd-yyyy');
-  const currentTimeStamp = format(now, 'H:mm:ss.SSS');
-  const localFilePath = `./${currentTimeStamp}.json`;
+  const currentTimeStamp = format(now, 'H:mm:ss');
+  const localFilePath = `./tmp/${currentTimeStamp}.json`;
 
   // Run database profiler
   await profileDatabase(localFilePath, options?.project, options?.duration);
-
   // Parse results from file into JSON
   const parsedResults = await parseResults(localFilePath);
 
@@ -227,22 +252,28 @@ export async function profileAndUpload(
   unlinkSync(localFilePath);
 
   // Write results to Stackdriver
-  const log = logging.log('my-log');
-  // Create array of log entries
-  const stackdriverEntries: any[] = [];
-  parsedResults.forEach(parsedLine => {
-    const resource = {
-      // This example targets the "global" resource for simplicity
-      type: 'global',
-    };
-    stackdriverEntries.push(log.entry({ resource }, parsedLine));
-  });
-  // Write log entries all at once
-  await log.write(stackdriverEntries);
+  // const log = logging.log('my-log');
+  // // Create array of log entries
+  // const stackdriverEntries: any[] = [];
+  // parsedResults.forEach(parsedLine => {
+  //   const resource = {
+  //     // This example targets the "global" resource for simplicity
+  //     type: 'global',
+  //   };
+  //   stackdriverEntries.push(log.entry({ resource }, parsedLine));
+  // });
+  // // Write log entries all at once
+  // await log.write(stackdriverEntries);
 
-  // Write profiler results to Cloud Storage
-  const cloudStorageFilePath = `profiler-service-results/${currentDateStamp}/${currentTimeStamp}.json`;
-  await uploadResults(cloudStorageFilePath, parsedResults, {
-    project: options?.project,
-  });
+  // // Write profiler results to Cloud Storage
+  // const cloudStorageFilePath = `profiler-service-results/${currentDateStamp}/${currentTimeStamp}.json`;
+  // await uploadResults(cloudStorageFilePath, parsedResults, {
+  //   project: options?.project,
+  // });
+  if (parsedResults.length) {
+    await writeResultsLocally(
+      `./output/${currentDateStamp}_${currentTimeStamp}.json`,
+      parsedResults,
+    );
+  }
 }

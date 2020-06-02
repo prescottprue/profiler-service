@@ -3,3 +3,5 @@ node_modules
 serviceAccount.json
 lib
 .env.private
+tmp
+output

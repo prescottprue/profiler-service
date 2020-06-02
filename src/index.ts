@@ -2,7 +2,7 @@ import { profileAndUpload } from './profilerService';
 import { MINS_TO_MS_CONVERSION } from './constants';
 
 const TIMEOUT = 5; // In minutes
-const PROFILE_PROJECT = process.env.PROFILING_PROJECT || 'reside-test';
+const PROFILE_PROJECT = process.env.PROFILING_PROJECT || 'reside-prod';
 
 /**
  *
