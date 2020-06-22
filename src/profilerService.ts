@@ -1,17 +1,20 @@
 import * as admin from 'firebase-admin';
-import { readFile, mkdirSync, existsSync, writeFileSync, unlinkSync } from 'fs';
-import { promisify } from 'util';
+import {
+  mkdirSync,
+  existsSync,
+  writeFileSync,
+  unlinkSync,
+  promises as fs,
+} from 'fs';
 import { dirname } from 'path';
+import { tmpdir } from 'os';
 import { format } from 'date-fns';
 import { Logging } from '@google-cloud/logging';
 import { runCommand, to } from './utils';
 import { MINS_TO_S_CONVERSION } from './constants';
-// const { Logging } = require('@google-cloud/logging'); // eslint-disable-line
 
 // Creates a client
 const logging = new Logging();
-
-const readFilePromise = promisify(readFile);
 
 /**
  * @param outputPath - File path for results
@@ -23,6 +26,7 @@ async function profileDatabase(
   projectName?: string,
   profileDuration?: any,
 ): Promise<any> {
+  console.log(`Starting profiling with recording to path: ${outputPath}`);
   const duration = profileDuration * MINS_TO_S_CONVERSION || '30'; // in seconds
   const outFolder = dirname(outputPath);
   try {
@@ -62,11 +66,10 @@ async function profileDatabase(
 
   try {
     // Call database profiler
-    const results = await runCommand({
+    await runCommand({
       command: 'npx firebase',
       args: commandArgs,
     });
-    return results;
   } catch (err) {
     console.error('Error running firebase command with args:', commandArgs);
   }
@@ -74,12 +77,11 @@ async function profileDatabase(
 
 /**
  * @param resultsPath - Path of results file
+ * @returns Array of parsed lines
  */
 async function parseResults(resultsPath: string): Promise<any[]> {
   console.log('Starting profiler results parse...');
-  const [readFileErr, resultsFileContents] = await to(
-    readFilePromise(resultsPath),
-  );
+  const [readFileErr, resultsFileContents] = await to(fs.readFile(resultsPath));
 
   // Handle errors reading file
   if (readFileErr) {
@@ -99,21 +101,21 @@ async function parseResults(resultsPath: string): Promise<any[]> {
     resultsStringsByLine,
   );
 
+  // Remove falsey values (i.e. blank lines)
+  const nonEmptyResults = resultsStringsByLine.filter(Boolean);
+
   // Split results into different lines and parse into JSON
-  const parsedLines = resultsStringsByLine.map((resultLineStr, lineIdx) => {
+  return nonEmptyResults.map((resultLineStr, lineIdx) => {
     try {
       return JSON.parse(resultLineStr);
     } catch (err) {
       console.error(
-        `Error parsing line ${lineIdx}/${resultsStringsByLine.length}`,
+        `Error parsing line ${lineIdx + 1}/${resultsStringsByLine.length}`,
         resultLineStr,
       );
       return resultLineStr;
     }
   });
-
-  // Remove falsey values (i.e. blank lines)
-  return parsedLines.filter(Boolean);
 }
 
 /**
@@ -135,7 +137,7 @@ async function getServiceAccount(): Promise<any> {
   const serviceAccountPath = './serviceAccount.json';
   if (existsSync(serviceAccountPath)) {
     console.log('Loading service account from local file');
-    const saStr = await readFilePromise(serviceAccountPath);
+    const saStr = await fs.readFile(serviceAccountPath);
     try {
       return JSON.parse(saStr.toString());
     } catch (err) {
@@ -143,9 +145,10 @@ async function getServiceAccount(): Promise<any> {
       throw err;
     }
   }
-  const serviceSccountErr = 'Service Account not found';
-  console.error(serviceSccountErr);
-  throw new Error(serviceSccountErr);
+  const serviceSccountErr =
+    'Service Account not found, falling back to default credentials';
+  console.warn(serviceSccountErr);
+  return {};
 }
 
 interface UploadSettings {
@@ -175,7 +178,9 @@ async function uploadResults(
     process.env.GCLOUD_PROJECT ||
     process.env.GCP_PROJECT;
   const bucketName =
-    (settings && settings.bucketName) || `${projectId}.appspot.com`;
+    (settings && settings.bucketName) ||
+    process.env.GCLOUD_BUCKET ||
+    `${projectId}.appspot.com`;
 
   admin.initializeApp({
     credential,
@@ -183,7 +188,7 @@ async function uploadResults(
   });
 
   try {
-    const stringifiedResults = JSON.stringify(resultsToUpload, null, 2);
+    const stringifiedResults = JSON.stringify(resultsToUpload);
     const results = await admin
       .storage()
       .bucket(bucketName)
@@ -202,7 +207,7 @@ async function uploadResults(
 interface ProfileAndUploadOptions {
   /* Time to run profiler */
   duration: number;
-  project: string;
+  project?: string;
 }
 
 /**
@@ -215,7 +220,7 @@ export async function profileAndUpload(
   const now = new Date();
   const currentDateStamp = format(now, 'MM-dd-yyyy');
   const currentTimeStamp = format(now, 'H:mm:ss.SSS');
-  const localFilePath = `./${currentTimeStamp}.json`;
+  const localFilePath = `${tmpdir()}/${currentTimeStamp}.json`;
 
   // Run database profiler
   await profileDatabase(localFilePath, options?.project, options?.duration);
@@ -230,7 +235,7 @@ export async function profileAndUpload(
   const log = logging.log('my-log');
   // Create array of log entries
   const stackdriverEntries: any[] = [];
-  parsedResults.forEach(parsedLine => {
+  parsedResults.forEach((parsedLine) => {
     const resource = {
       // This example targets the "global" resource for simplicity
       type: 'global',
@@ -238,7 +243,7 @@ export async function profileAndUpload(
     stackdriverEntries.push(log.entry({ resource }, parsedLine));
   });
   // Write log entries all at once
-  await log.write(stackdriverEntries);
+  log.write(stackdriverEntries);
 
   // Write profiler results to Cloud Storage
   const cloudStorageFilePath = `profiler-service-results/${currentDateStamp}/${currentTimeStamp}.json`;
