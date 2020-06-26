@@ -24,4 +24,3 @@ output
 .*
 *.log
 README.md
-tsconfig.json

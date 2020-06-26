@@ -1,14 +1,14 @@
 {
   "compilerOptions": {
     "module": "commonjs",
+    "outDir": "lib",
+    "target": "es2016",
     "noImplicitReturns": true,
     "noUnusedLocals": true,
-    "outDir": "lib",
     "sourceMap": true,
     "strict": true,
-    "target": "es2016",
     "esModuleInterop": true,
-    "skipLibCheck": true,
+    "skipLibCheck": true
   },
   "compileOnSave": true,
   "include": [

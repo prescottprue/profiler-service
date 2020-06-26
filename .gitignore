@@ -5,3 +5,5 @@ lib
 .env.private
 output
 tmp
+env_variables.yaml
+.env.local

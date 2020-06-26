@@ -1,1 +1,10 @@
 runtime: nodejs12
+
+includes:
+  - env_variables.yaml
+
+manual_scaling:
+  instances: 1
+resources:
+  cpu: 1
+  memory_gb: 2

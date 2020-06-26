@@ -11,7 +11,9 @@ import { tmpdir } from 'os';
 import { format } from 'date-fns';
 import { Logging } from '@google-cloud/logging';
 import { runCommand, to } from './utils';
-import { MINS_TO_S_CONVERSION } from './constants';
+import { ProfilerResult, ProfilerResultWithExtraValues } from './types';
+
+const MINS_TO_S_CONVERSION = 60;
 
 // Creates a client
 const logging = new Logging();
@@ -49,16 +51,17 @@ async function profileDatabase(
     '--raw',
     '-o',
     outputPath,
-    '--project',
-    projectName || '',
     '-d',
     duration?.toString() || '30',
   ];
+
+  if (projectName) {
+    commandArgs.push('--project', projectName);
+  }
   console.log('Running command with args:', commandArgs);
 
-  if (process.env.FIREBASE_TOKEN) {
-    commandArgs.push('--token', process.env.FIREBASE_TOKEN);
-  } else {
+  // FIREBASE_TOKEN picked up by firebase-tools
+  if (!process.env.FIREBASE_TOKEN) {
     console.warn(
       'NOTE: Running without FIREBASE_TOKEN can cause authentication issues',
     );
@@ -72,6 +75,7 @@ async function profileDatabase(
     });
   } catch (err) {
     console.error('Error running firebase command with args:', commandArgs);
+    throw err
   }
 }
 
@@ -79,7 +83,7 @@ async function profileDatabase(
  * @param resultsPath - Path of results file
  * @returns Array of parsed lines
  */
-async function parseResults(resultsPath: string): Promise<any[]> {
+async function parseResults(resultsPath: string): Promise<ProfilerResult[]> {
   console.log('Starting profiler results parse...');
   const [readFileErr, resultsFileContents] = await to(fs.readFile(resultsPath));
 
@@ -119,7 +123,8 @@ async function parseResults(resultsPath: string): Promise<any[]> {
 }
 
 /**
- *
+ * Get service account from local file or environment variable
+ * @returns Promise which resolves with service account object
  */
 async function getServiceAccount(): Promise<any> {
   // Load from environment variable
@@ -155,6 +160,7 @@ interface UploadSettings {
   project?: string;
   bucketName?: string;
 }
+
 /**
  * @param cloudStorageFilePath - Path to file in cloud storage
  * @param resultsToUpload - JSON results to upload
@@ -162,7 +168,7 @@ interface UploadSettings {
  */
 async function uploadResults(
   cloudStorageFilePath: string,
-  resultsToUpload: string[],
+  resultsToUpload: ProfilerResultWithExtraValues[],
   settings?: UploadSettings,
 ): Promise<any> {
   console.log(
@@ -189,7 +195,7 @@ async function uploadResults(
 
   try {
     const stringifiedResults = JSON.stringify(resultsToUpload);
-    const results = await admin
+    await admin
       .storage()
       .bucket(bucketName)
       .file(cloudStorageFilePath)
@@ -197,7 +203,6 @@ async function uploadResults(
     console.log(
       `Successfully uploaded to ${bucketName}/${cloudStorageFilePath}`,
     );
-    return results;
   } catch (err) {
     console.error(`Error uploading ${cloudStorageFilePath}: `, err);
     throw err;
@@ -227,15 +232,22 @@ export async function profileAndUpload(
 
   // Parse results from file into JSON
   const parsedResults = await parseResults(localFilePath);
+  const resultsWithExtraValues: ProfilerResultWithExtraValues[] = parsedResults.map(
+    (parsedLine) => ({
+      pathStr: parsedLine?.path?.join('/') || '',
+      parentPath: parsedLine?.path && parsedLine.path[0] || '',
+      ...parsedLine,
+    }),
+  );
 
   // Remove local file
   unlinkSync(localFilePath);
 
   // Write results to Stackdriver
-  const log = logging.log('my-log');
+  const log = logging.log('profiler-service');
   // Create array of log entries
   const stackdriverEntries: any[] = [];
-  parsedResults.forEach((parsedLine) => {
+  resultsWithExtraValues.forEach((parsedLine) => {
     const resource = {
       // This example targets the "global" resource for simplicity
       type: 'global',
@@ -247,7 +259,5 @@ export async function profileAndUpload(
 
   // Write profiler results to Cloud Storage
   const cloudStorageFilePath = `profiler-service-results/${currentDateStamp}/${currentTimeStamp}.json`;
-  await uploadResults(cloudStorageFilePath, parsedResults, {
-    project: options?.project,
-  });
+  await uploadResults(cloudStorageFilePath, resultsWithExtraValues);
 }
